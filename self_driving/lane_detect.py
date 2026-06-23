@@ -291,7 +291,7 @@ class LaneDetector(object):
 
         print("left :", left_center_x)
         print("right:", right_center_x)
-e
+
         if left_centroid_sum != 0 and right_centroid_sum != 0:
             centroid_sum = (left_centroid_sum + right_centroid_sum) // 2
         elif left_centroid_sum != 0:
