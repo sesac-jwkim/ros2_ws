@@ -305,12 +305,18 @@ class LaneDetector(object):
 
         if left_centroid_sum != 0 and right_centroid_sum != 0:
             centroid_sum = (left_centroid_sum + right_centroid_sum) // 2
+            self.last_center_pos = centroid_sum  # 정상 검출되었으므로 위치 기억
         elif left_centroid_sum != 0:
             centroid_sum = left_centroid_sum + track_w_pix // 2
+            self.last_center_pos = centroid_sum  # 정상 검출되었으므로 위치 기억
         elif right_centroid_sum != 0:
             centroid_sum = right_centroid_sum - track_w_pix // 2
+            self.last_center_pos = centroid_sum  # 정상 검출되었으므로 위치 기억
         else:
-            return result_image, None, max_center_x
+            center_pos = self.last_center_pos
+            angle = math.degrees(-math.atan((center_pos - (w / 2.0)) / (h / 2.0)))
+            return result_image, angle, max_center_x
+            # return result_image, None, max_center_x
 
         center_pos = centroid_sum  # 최종 타겟의 중심 좌표
 
