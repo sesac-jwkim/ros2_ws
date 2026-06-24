@@ -204,14 +204,16 @@ class LaneDetector(object):
         left_center_x = []
         right_center_x = []
         # 카메라로 보이는 트랙 너비
-        track_w_pix = 500
+        track_w_pix = 400
 
+        # 이전 중앙값
         for roi in self.rois:
             blob = image[roi[0] : roi[1], roi[2] : roi[3]]  # ROI 구역 자르기
 
+            roi_h, roi_w = blob.shape[:2]
             # 좌우 roi 나눠서 각 영역에서 차선 검출
-            left_blob = blob[:, : w // 2]
-            right_blob = blob[:, w // 2 :]
+            left_blob = blob[:, : roi_w // 2]
+            right_blob = blob[:, roi_w // 2 :]
 
             left_contours = cv2.findContours(
                 left_blob, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_L1
@@ -252,7 +254,7 @@ class LaneDetector(object):
                 rect = cv2.minAreaRect(right_max_contour_area[0])
                 box = np.intp(cv2.boxPoints(rect))
                 for j in range(4):
-                    box[j, 1] = box[j, 1] + roi[0]
+                    box[j, 1] = box[j, 1] + roi[0] + roi_w // 2
                 cv2.drawContours(
                     result_image, [box], -1, (255, 255, 0), 2
                 )  # 화면에 사각형 박스 그리기
@@ -260,7 +262,7 @@ class LaneDetector(object):
                 # 사각형 대각선 꼭짓점을 통해 중심점 X좌표 구하기
                 pt1_x, pt1_y = box[0, 0], box[0, 1]
                 pt3_x, pt3_y = box[2, 0], box[2, 1]
-                line_center_x, line_center_y = (pt1_x + pt3_x) / 2 + w // 2, (
+                line_center_x, line_center_y = (pt1_x + pt3_x) / 2 + roi_w // 2, (
                     pt1_y + pt3_y
                 ) / 2
 
@@ -285,6 +287,7 @@ class LaneDetector(object):
                 )  # 구역별 가중치를 곱해 더함
                 left_weight_sum += weight
 
+        max_center_x = -1
         for i in range(len(right_center_x)):
             if right_center_x[i] != -1:
                 weight = self.rois[i][-1]
@@ -300,30 +303,34 @@ class LaneDetector(object):
         if right_weight_sum > 0:
             right_centroid_sum /= right_weight_sum
 
-        print("left :", left_center_x)
-        print("right:", right_center_x)
+        # print("left :", left_center_x)
+        # print("right:", right_center_x)
 
+        print("roi_w= ", roi_w)
+        print("w= ", w)
         if left_centroid_sum != 0 and right_centroid_sum != 0:
             centroid_sum = (left_centroid_sum + right_centroid_sum) // 2
-            self.last_center_pos = centroid_sum  # 정상 검출되었으므로 위치 기억
+            print("BOTH")
+            print("LEFT =", left_centroid_sum)
+            print("RIGHT =", right_centroid_sum)
+            print("CENTER =", centroid_sum)
         elif left_centroid_sum != 0:
             centroid_sum = left_centroid_sum + track_w_pix // 2
-            self.last_center_pos = centroid_sum  # 정상 검출되었으므로 위치 기억
+            print("LEFT")
         elif right_centroid_sum != 0:
             centroid_sum = right_centroid_sum - track_w_pix // 2
-            self.last_center_pos = centroid_sum  # 정상 검출되었으므로 위치 기억
+            print("RIGHT")
         else:
-            center_pos = self.last_center_pos
-            angle = math.degrees(-math.atan((center_pos - (w / 2.0)) / (h / 2.0)))
-            return result_image, angle, max_center_x
-            # return result_image, None, max_center_x
+            print("NONO")
+            return result_image, None, -1
 
         center_pos = centroid_sum  # 최종 타겟의 중심 좌표
+        print("center_pos =", center_pos)
 
         # 화면의 중앙점과 계산된 차선 중심점 사이의 거리를 이용해 차량 회전 각도(Angle) 계산
         angle = math.degrees(-math.atan((center_pos - (w / 2.0)) / (h / 2.0)))
-
-        return result_image, angle, max_center_x
+        print("angle =", angle)
+        return result_image, angle, center_pos
 
 
 image_queue = queue.Queue(2)
