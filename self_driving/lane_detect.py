@@ -196,6 +196,9 @@ class LaneDetector(object):
         """
         left_centroid_sum = 0
         right_centroid_sum = 0
+        left_weight_sum = 0
+        right_weight_sum = 0
+
         h, w = image.shape[:2]
         max_center_x = -1
         left_center_x = []
@@ -207,9 +210,8 @@ class LaneDetector(object):
             blob = image[roi[0] : roi[1], roi[2] : roi[3]]  # ROI 구역 자르기
 
             # 좌우 roi 나눠서 각 영역에서 차선 검출
-            _, w_roi = blob.shape[:2]  # 해상도 검출
-            left_blob = blob[:, : w_roi // 2]
-            right_blob = blob[:, w_roi // 2 :]
+            left_blob = blob[:, : w // 2]
+            right_blob = blob[:, w // 2 :]
 
             left_contours = cv2.findContours(
                 left_blob, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_L1
@@ -258,7 +260,7 @@ class LaneDetector(object):
                 # 사각형 대각선 꼭짓점을 통해 중심점 X좌표 구하기
                 pt1_x, pt1_y = box[0, 0], box[0, 1]
                 pt3_x, pt3_y = box[2, 0], box[2, 1]
-                line_center_x, line_center_y = (pt1_x + pt3_x) / 2 + w_roi // 2, (
+                line_center_x, line_center_y = (pt1_x + pt3_x) / 2 + w // 2, (
                     pt1_y + pt3_y
                 ) / 2
 
@@ -275,19 +277,28 @@ class LaneDetector(object):
 
         for i in range(len(left_center_x)):
             if left_center_x[i] != -1:
+                weight = self.rois[i][-1]
                 if left_center_x[i] > max_center_x:
                     max_center_x = left_center_x[i]
                 left_centroid_sum += (
-                    left_center_x[i] * self.rois[i][-1]
+                    left_center_x[i] * weight
                 )  # 구역별 가중치를 곱해 더함
+                left_weight_sum += weight
 
         for i in range(len(right_center_x)):
             if right_center_x[i] != -1:
+                weight = self.rois[i][-1]
                 if right_center_x[i] > max_center_x:
                     max_center_x = right_center_x[i]
                 right_centroid_sum += (
-                    right_center_x[i] * self.rois[i][-1]
+                    right_center_x[i] * weight
                 )  # 구역별 가중치를 곱해 더함
+                right_weight_sum += weight
+        if left_weight_sum > 0:
+            left_centroid_sum /= left_weight_sum
+
+        if right_weight_sum > 0:
+            right_centroid_sum /= right_weight_sum
 
         print("left :", left_center_x)
         print("right:", right_center_x)
@@ -301,7 +312,7 @@ class LaneDetector(object):
         else:
             return result_image, None, max_center_x
 
-        center_pos = centroid_sum / self.weight_sum  # 최종 타겟의 중심 좌표
+        center_pos = centroid_sum  # 최종 타겟의 중심 좌표
 
         # 화면의 중앙점과 계산된 차선 중심점 사이의 거리를 이용해 차량 회전 각도(Angle) 계산
         angle = math.degrees(-math.atan((center_pos - (w / 2.0)) / (h / 2.0)))
