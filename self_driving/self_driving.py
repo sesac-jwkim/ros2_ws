@@ -39,7 +39,7 @@ class SelfDrivingNode(Node):
         )
         self.name = name
         self.is_running = True
-        self.pid = pid.PID(0.4, 0.0, 0.05)
+        self.pid = pid.PID(0.4, 0.0, 0.15)  # defualt : 0.4 ,0.0, 0.05
         self.param_init()
 
         self.fps = fps.FPS()
@@ -129,7 +129,7 @@ class SelfDrivingNode(Node):
         self.crosswalk_length = 0.1 + 0.3  # the length of zebra crossing and the robot
 
         self.start_slow_down = False  # slowing down sign
-        self.normal_speed = 0.1  # normal driving speed
+        self.normal_speed = 0.3  # normal driving speed
         self.slow_down_speed = 0.1  # slowing down speed
 
         self.traffic_signs_status = None  # record the state of the traffic lights
@@ -284,7 +284,7 @@ class SelfDrivingNode(Node):
                 else:  # need to detect continuously, otherwise reset
                     self.count_crosswalk = 0
 
-                # deceleration processing
+                # #deceleration processing
                 if self.start_slow_down:
                     if self.traffic_signs_status is not None:
                         area = abs(
@@ -317,48 +317,65 @@ class SelfDrivingNode(Node):
                 else:
                     twist.linear.x = self.normal_speed  # go straight with normal speed
 
-                # If the robot detects a stop sign and a crosswalk, it will slow down to ensure stable recognition
-                if 0 < self.park_x and 135 < self.crosswalk_distance:
-                    twist.linear.x = self.slow_down_speed
-                    if (
-                        not self.start_park and 180 < self.crosswalk_distance
-                    ):  # When the robot is close enough to the crosswalk, it will start parking
-                        self.count_park += 1
-                        if self.count_park >= 15:
-                            self.mecanum_pub.publish(Twist())
-                            self.start_park = True
-                            self.stop = True
-                            threading.Thread(target=self.park_action).start()
-                    else:
-                        self.count_park = 0
+                # # If the robot detects a stop sign and a crosswalk, it will slow down to ensure stable recognition
+                # if 0 < self.park_x and 135 < self.crosswalk_distance:
+                #     twist.linear.x = self.slow_down_speed
+                #     if not self.start_park and 180 < self.crosswalk_distance:  # When the robot is close enough to the crosswalk, it will start parking
+                #         self.count_park += 1
+                #         if self.count_park >= 15:
+                #             self.mecanum_pub.publish(Twist())
+                #             self.start_park = True
+                #             self.stop = True
+                #             threading.Thread(target=self.park_action).start()
+                #     else:
+                #         self.count_park = 0
 
-                ##################################################################################
                 # line following processing
-                # lane_angle: , lane_x : lanes center
-                # line following processing
-                result_image, lane_angle, lane_center_x = self.lane_detect(
+                result_image, lane_angle, lane_x = self.lane_detect(
                     binary_image, image.copy()
-                )
+                )  # return 변수 추가, the coordinate of the line while the robot is in the middle of the lane
 
-                if lane_center_x >= 0 and not self.stop:
-                    # 차선 중앙을 화면 중앙에 맞추는 PID
-                    self.pid.SetPoint = w / 2.0  # 640 기준이면 320
-                    self.pid.update(lane_center_x)
-
-                    if self.machine_type != "MentorPi_Acker":
-                        # PID 출력값을 회전 속도로 사용
-                        twist.angular.z = common.set_range(self.pid.output, -0.25, 0.25)
-                    else:
-                        # Ackermann 타입이면 조향각처럼 사용
-                        steer_angle = common.set_range(self.pid.output, -0.35, 0.35)
-                        twist.angular.z = twist.linear.x * math.tan(steer_angle) / 0.145
-
+                if lane_x >= 0 and not self.stop:
+                    if lane_x > 220:  # lane_x 대신 centers로 회전 감지, default : 150
+                        self.count_turn += 1
+                        if self.count_turn > 5 and not self.start_turn:
+                            self.start_turn = True
+                            self.count_turn = 0
+                            self.start_turn_time_stamp = time.time()
+                        if self.machine_type != "MentorPi_Acker":
+                            twist.linear.x = self.slow_down_speed
+                            twist.angular.z = -0.7  # turning speed defualt : -0.45
+                        else:
+                            twist.angular.z = twist.linear.x * math.tan(-0.5061) / 0.145
+                    else:  # use PID algorithm to correct turns on a straight road
+                        self.count_turn = 0
+                        if (
+                            time.time() - self.start_turn_time_stamp > 2
+                            and self.start_turn
+                        ):
+                            self.start_turn = False
+                        if not self.start_turn:
+                            # defualt : 130
+                            self.pid.SetPoint = 200  # the coordinate of the line while the robot is in the middle of the lane
+                            self.pid.update(lane_x)
+                            if self.machine_type != "MentorPi_Acker":
+                                twist.angular.z = common.set_range(
+                                    self.pid.output, -0.3, 0.3
+                                )
+                            else:
+                                twist.angular.z = (
+                                    twist.linear.x
+                                    * math.tan(
+                                        common.set_range(self.pid.output, -0.1, 0.1)
+                                    )
+                                    / 0.145
+                                )
+                        else:
+                            if self.machine_type == "MentorPi_Acker":
+                                twist.angular.z = 0.15 * math.tan(-0.5061) / 0.145
                     self.mecanum_pub.publish(twist)
-
                 else:
                     self.pid.clear()
-
-                #################################################################################
 
                 if self.objects_info:
                     for i in self.objects_info:
@@ -390,6 +407,8 @@ class SelfDrivingNode(Node):
         self.mecanum_pub.publish(Twist())
         rclpy.shutdown()
 
+    #############################
+    # 작은 박스 무시
     # Obtain the target detection result
     def get_object_callback(self, msg):
         self.objects_info = msg.objects
@@ -404,7 +423,6 @@ class SelfDrivingNode(Node):
                     int((i.box[0] + i.box[2]) / 2),
                     int((i.box[1] + i.box[3]) / 2),
                 )
-
                 if class_name == "crosswalk":
                     if (
                         center[1] > min_distance
