@@ -127,6 +127,8 @@ class SelfDrivingNode(Node):
         self.count_crosswalk = 0
         self.crosswalk_distance = 0  # distance to the zebra crossing
         self.crosswalk_length = 0.1 + 0.3  # the length of zebra crossing and the robot
+        self.ignore_crosswalk = False  # 횡단보도 진입 시 횡단보도 무시
+        self.ignore_start_time = 0  # 횡단보도 진입시각
 
         self.start_slow_down = False  # slowing down sign
         self.normal_speed = 0.3  # normal driving speed
@@ -269,8 +271,15 @@ class SelfDrivingNode(Node):
 
                 # if detecting the zebra crossing, start to slow down
                 self.get_logger().info("\033[1;33m%s\033[0m" % self.crosswalk_distance)
+                # 횡단보도 3초간 무시
+                if self.ignore_crosswalk:
+                    if time.time() - self.ignore_start_time > 3:
+                        self.ignore_crosswalk = False
+
                 if (
-                    70 < self.crosswalk_distance and not self.start_slow_down
+                    70 < self.crosswalk_distance
+                    and not self.start_slow_down
+                    and not self.ignore_crosswalk
                 ):  # The robot starts to slow down only when it is close enough to the zebra crossing
                     self.count_crosswalk += 1
                     if (
@@ -284,8 +293,10 @@ class SelfDrivingNode(Node):
                 else:  # need to detect continuously, otherwise reset
                     self.count_crosswalk = 0
 
-                # #deceleration processing
-                if self.start_slow_down:
+                # deceleration processing
+                # 주행 상태 확인
+                if self.stop:
+                    # 정지 중 신호등 검출
                     if self.traffic_signs_status is not None:
                         area = abs(
                             self.traffic_signs_status.box[0]
@@ -294,28 +305,43 @@ class SelfDrivingNode(Node):
                             self.traffic_signs_status.box[1]
                             - self.traffic_signs_status.box[3]
                         )
+                        # 빨간불
                         if (
                             self.traffic_signs_status.class_name == "red"
                             and area < 1000
                         ):  # If the robot detects a red traffic light, it will stop
                             self.mecanum_pub.publish(Twist())
                             self.stop = True
+                        # 초록불
                         elif (
                             self.traffic_signs_status.class_name == "green"
+                            # 초록불 인지 범위 설정
+                            and area < 1000
                         ):  # If the traffic light is green, the robot will slow down and pass through
-                            twist.linear.x = self.slow_down_speed
+                            twist.linear.x = self.normal_speed
                             self.stop = False
-                    if (
-                        not self.stop
-                    ):  # In other cases where the robot is not stopped, slow down the speed and calculate the time needed to pass through the crosswalk. The time needed is equal to the length of the crosswalk divided by the driving speed
-                        twist.linear.x = self.slow_down_speed
-                        if (
-                            time.time() - self.count_slow_down
-                            > self.crosswalk_length / twist.linear.x
-                        ):
-                            self.start_slow_down = False
+                            self.start_slow_down = False  # 횡단보도 종료
+                            self.ignore_crosswalk = True # 횡단보도 검출 무시
+                            self.ignore_start_time = time.time() # 횡단보도 진입 시각 확인
                 else:
-                    twist.linear.x = self.normal_speed  # go straight with normal speed
+                    # 주행 중 신호등 검출
+                    if self.traffic_signs_status is not None:
+                        area = abs(
+                            self.traffic_signs_status.box[0]
+                            - self.traffic_signs_status.box[2]
+                        ) * abs(
+                            self.traffic_signs_status.box[1]
+                            - self.traffic_signs_status.box[3]
+                        )
+                        # 빨간불 정지-> 횡단보도 확인 가능한 거리에서 횡단보도 없을 시
+                        if (
+                            self.traffic_signs_status.class_name == "red"
+                            and area > 1000
+                        ):  # If the robot detects a red traffic light, it will stop
+                            self.mecanum_pub.publish(Twist())
+                            self.stop = True
+                    else:
+                        twist.linear.x = self.normal_speed  # go straight with normal speed
 
                 # # If the robot detects a stop sign and a crosswalk, it will slow down to ensure stable recognition
                 # if 0 < self.park_x and 135 < self.crosswalk_distance:
