@@ -127,8 +127,9 @@ class SelfDrivingNode(Node):
         self.count_crosswalk = 0
         self.crosswalk_distance = 0  # distance to the zebra crossing
         self.crosswalk_length = 0.1 + 0.3  # the length of zebra crossing and the robot
-        self.ignore_crosswalk = False  # 횡단보도 진입 시 횡단보도 무시
-        self.ignore_start_time = 0  # 횡단보도 진입시각
+        self.crosswalk_stop_start = 0
+        self.ignore_crosswalk = False
+        self.ignore_start = 0
 
         self.start_slow_down = False  # slowing down sign
         self.normal_speed = 0.3  # normal driving speed
@@ -268,30 +269,40 @@ class SelfDrivingNode(Node):
                 binary_image = self.lane_detect.get_binary(image)
 
                 twist = Twist()
+                twist.linear.x = self.normal_speed
 
                 # if detecting the zebra crossing, start to slow down
+                # if detecting the zebra crossing, start to slow down
                 self.get_logger().info("\033[1;33m%s\033[0m" % self.crosswalk_distance)
-                # 횡단보도 3초간 무시
-                if self.ignore_crosswalk:
-                    if time.time() - self.ignore_start_time > 3:
-                        self.ignore_crosswalk = False
+                if self.ignore_crosswalk and time.time() - self.ignore_start > 10:
+                    self.ignore_crosswalk = False
+                    self.ignore_start = 0
 
                 if (
-                    70 < self.crosswalk_distance
-                    and not self.start_slow_down
-                    and not self.ignore_crosswalk
+                    not self.ignore_crosswalk
+                    and 200 < self.crosswalk_distance
+                    and not self.stop
                 ):  # The robot starts to slow down only when it is close enough to the zebra crossing
                     self.count_crosswalk += 1
                     if (
                         self.count_crosswalk == 3
                     ):  # judge multiple times to prevent false detection
                         self.count_crosswalk = 0
-                        self.start_slow_down = True  # sign for slowing down
-                        self.count_slow_down = (
-                            time.time()
-                        )  # fixing time for slowing down
-                else:  # need to detect continuously, otherwise reset
-                    self.count_crosswalk = 0
+                        self.stop = True
+                        self.crosswalk_stop_start = time.time()
+                        self.mecanum_pub.publish(Twist())
+                # else:  # need to detect continuously, otherwise reset
+                #     self.count_crosswalk = 0
+
+                if (
+                    self.crosswalk_stop_start != 0
+                    and time.time() - self.crosswalk_stop_start > 3
+                ):
+                    self.stop = False
+                    self.crosswalk_stop_start = 0
+                    self.ignore_start = time.time()
+                    self.ignore_crosswalk = True
+                    self.mecanum_pub.publish(twist)
 
                 # deceleration processing
                 # 주행 상태 확인
@@ -319,10 +330,13 @@ class SelfDrivingNode(Node):
                             and area < 1000
                         ):  # If the traffic light is green, the robot will slow down and pass through
                             twist.linear.x = self.normal_speed
+                            self.mecanum_pub.publish(twist)
                             self.stop = False
                             self.start_slow_down = False  # 횡단보도 종료
-                            self.ignore_crosswalk = True # 횡단보도 검출 무시
-                            self.ignore_start_time = time.time() # 횡단보도 진입 시각 확인
+                            self.ignore_crosswalk = True  # 횡단보도 검출 무시
+                            self.ignore_start_time = (
+                                time.time()
+                            )  # 횡단보도 진입 시각 확인
                 else:
                     # 주행 중 신호등 검출
                     if self.traffic_signs_status is not None:
@@ -341,7 +355,9 @@ class SelfDrivingNode(Node):
                             self.mecanum_pub.publish(Twist())
                             self.stop = True
                     else:
-                        twist.linear.x = self.normal_speed  # go straight with normal speed
+                        twist.linear.x = (
+                            self.normal_speed
+                        )  # go straight with normal speed
 
                 # # If the robot detects a stop sign and a crosswalk, it will slow down to ensure stable recognition
                 # if 0 < self.park_x and 135 < self.crosswalk_distance:
