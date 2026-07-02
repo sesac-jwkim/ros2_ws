@@ -32,7 +32,9 @@ from ros_robot_controller_msgs.msg import (
     PWMServoState,
     RGBStates,
     RGBState,
+    ButtonState,
 )
+
 
 import socket
 
@@ -101,6 +103,10 @@ class SelfDrivingNode(Node):
             0.5, self.yellow_blink_callback  # 0.5초마다 ON/OFF 전환
         )
 
+        self.create_subscription(
+            ButtonState, "/ros_robot_controller/button", self.button_callback, 1
+        )
+
     def init_process(self):
         self.timer.cancel()
 
@@ -113,7 +119,7 @@ class SelfDrivingNode(Node):
             self.display = True
             self.enter_srv_callback(Trigger.Request(), Trigger.Response())
             request = SetBool.Request()
-            request.data = True
+            request.data = False
             self.set_running_srv_callback(request, SetBool.Response())
 
         # self.park_action()
@@ -378,6 +384,12 @@ class SelfDrivingNode(Node):
         elif mode == "off":
             self.publish_stm32_rgb(0, 0, 0)
 
+    def button_callback(self, msg):
+        if msg.state in (1, 5) and self.enter and not self.start:
+            self.get_logger().info("START button pressed (id=%d) -> 주행 시작" % msg.id)
+            with self.lock:
+                self.start = True
+
     def main(self):
         while self.is_running:
             time_start = time.time()
@@ -464,18 +476,21 @@ class SelfDrivingNode(Node):
                             self.stop_red = True
                         # 초록불
                         elif (
-                            self.traffic_signs_status.class_name == "green"
+                            self.traffic_signs_status.class_name
+                            == "green"
+                            # 초록불 인지 범위 설정
+                            # and area < 1000
                         ):  # If the traffic light is green, the robot will slow down and pass through
                             twist.linear.x = self.normal_speed
                             self.mecanum_pub.publish(twist)
                             self.stop = False
-                            # 횡단보도 앞 멈춤이었을 때
-                            if 280 < self.crosswalk_distance:
-                                self.ignore_crosswalk = True  # 횡단보도 검출 무시
-                                self.ignore_start_time = (
-                                    time.time()
-                                )  # 횡단보도 진입 시각 확인
+                            self.start_slow_down = False  # 횡단보도 종료
+                            self.ignore_crosswalk = True  # 횡단보도 검출 무시
+                            self.ignore_start_time = (
+                                time.time()
+                            )  # 횡단보도 진입 시각 확인
                             self.stop_red = False
+
                 else:
                     # 주행 중 신호등 검출
                     if self.traffic_signs_status is not None:
@@ -486,10 +501,10 @@ class SelfDrivingNode(Node):
                             self.traffic_signs_status.box[1]
                             - self.traffic_signs_status.box[3]
                         )
-                        # 빨간불 정지
-                        # 첫번째 신호등 / 횡단보도에서 빨간 불
+                        # 빨간불 정지-> 횡단보도 확인 가능한 거리에서 횡단보도 없을 시
                         if (
                             self.traffic_signs_status.class_name == "red"
+                            and area > 1000
                         ):  # If the robot detects a red traffic light, it will stop
                             self.mecanum_pub.publish(Twist())
                             self.stop = True
