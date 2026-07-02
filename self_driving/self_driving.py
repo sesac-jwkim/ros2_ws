@@ -464,23 +464,18 @@ class SelfDrivingNode(Node):
                             self.stop_red = True
                         # 초록불
                         elif (
-                            self.traffic_signs_status.class_name
-                            == "green"
-                            # 초록불 인지 범위 설정
-                            # and area < 1000
+                            self.traffic_signs_status.class_name == "green"
                         ):  # If the traffic light is green, the robot will slow down and pass through
                             twist.linear.x = self.normal_speed
                             self.mecanum_pub.publish(twist)
                             self.stop = False
-                            self.start_slow_down = False  # 횡단보도 종료
-                            self.ignore_crosswalk = True  # 횡단보도 검출 무시
-                            self.ignore_start_time = (
-                                time.time()
-                            )  # 횡단보도 진입 시각 확인
+                            # 횡단보도 앞 멈춤이었을 때
+                            if 280 < self.crosswalk_distance:
+                                self.ignore_crosswalk = True  # 횡단보도 검출 무시
+                                self.ignore_start_time = (
+                                    time.time()
+                                )  # 횡단보도 진입 시각 확인
                             self.stop_red = False
-                    else:
-                        # 정지해 있다가 횡단보도 빨강이 더이상 안보일 때/ 혹은 초록이라서 가다가 횡단보도 만나서 정지한 후
-
                 else:
                     # 주행 중 신호등 검출
                     if self.traffic_signs_status is not None:
@@ -491,15 +486,15 @@ class SelfDrivingNode(Node):
                             self.traffic_signs_status.box[1]
                             - self.traffic_signs_status.box[3]
                         )
-                        # 빨간불 정지-> 횡단보도 확인 가능한 거리에서 횡단보도 없을 시
+                        # 빨간불 정지
+                        # 첫번째 신호등 / 횡단보도에서 빨간 불
                         if (
                             self.traffic_signs_status.class_name == "red"
-                            and area > 1000
                         ):  # If the robot detects a red traffic light, it will stop
                             self.mecanum_pub.publish(Twist())
                             self.stop = True
 
-                 # 3. 주차 구역 처리
+                # 3. 주차 구역 처리
                 # 주차 표지판이 보이고(0 < park_y), 횡단보도 같은 구분선이 보이면 안정성을 위해 감속
                 if 0 <= self.park_y and 135 < self.crosswalk_distance:
                     twist.linear.x = self.slow_down_speed
